@@ -1,7 +1,21 @@
 "use client";
-// app/page.tsx — full sales performance dashboard
 
 import { useState, useEffect, useCallback } from "react";
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
+function toISO(d: Date) { return d.toISOString().split("T")[0]; }
+function today() { return toISO(new Date()); }
+function firstOfMonth(d = new Date()) { return toISO(new Date(d.getFullYear(), d.getMonth(), 1)); }
+function firstOfYear(d = new Date())  { return toISO(new Date(d.getFullYear(), 0, 1)); }
+function addMonths(d: Date, n: number) { return new Date(d.getFullYear(), d.getMonth() + n, 1); }
+
+const PRESETS = [
+  { label: "This Month",    from: () => firstOfMonth(),          to: () => today() },
+  { label: "Last Month",    from: () => firstOfMonth(addMonths(new Date(), -1)), to: () => toISO(new Date(new Date().getFullYear(), new Date().getMonth(), 0)) },
+  { label: "Last 3 Months", from: () => firstOfMonth(addMonths(new Date(), -3)), to: () => today() },
+  { label: "This Year",     from: () => firstOfYear(),           to: () => today() },
+  { label: "All Time",      from: () => "2020-01-01",            to: () => today() },
+] as const;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface FunnelRow {
@@ -198,11 +212,14 @@ type Tab = typeof TABS[number]["id"];
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function Page() {
-  const [tab, setTab]       = useState<Tab>("funnel");
+  const [tab, setTab]         = useState<Tab>("funnel");
   const [loading, setLoading] = useState(false);
-  const [ts, setTs]         = useState<string|null>(null);
-  const [err, setErr]       = useState<string|null>(null);
-  const [data, setData]     = useState<DashData>({ funnel:[], missed:[], stale:[], interview_outcomes:[] });
+  const [ts, setTs]           = useState<string|null>(null);
+  const [err, setErr]         = useState<string|null>(null);
+  const [data, setData]       = useState<DashData>({ funnel:[], missed:[], stale:[], interview_outcomes:[] });
+  const [from, setFrom]       = useState(firstOfMonth);
+  const [to, setTo]           = useState(today);
+  const [activePreset, setActivePreset] = useState<string>("This Month");
 
   const totalLeads  = data.funnel.reduce((s,r)=>s+(+r.total_leads||0),0);
   const totalWon    = data.funnel.reduce((s,r)=>s+(+r.deals_won||0),0);
@@ -212,10 +229,10 @@ export default function Page() {
     ? (data.funnel.reduce((s,r)=>s+(+r.conversion_pct||0),0)/data.funnel.length).toFixed(1)
     : "0.0";
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (f: string, t: string) => {
     setLoading(true); setErr(null);
     try {
-      const res = await fetch("/api/sales", { cache:"no-store" });
+      const res = await fetch(`/api/sales?from=${f}&to=${t}`, { cache:"no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
@@ -225,7 +242,14 @@ export default function Page() {
     setLoading(false);
   }, []);
 
-  useEffect(()=>{ load(); },[load]);
+  useEffect(()=>{ load(from, to); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function applyPreset(p: typeof PRESETS[number]) {
+    const f = p.from(); const t = p.to();
+    setFrom(f); setTo(t); setActivePreset(p.label); load(f, t);
+  }
+
+  function applyDates() { setActivePreset(""); load(from, to); }
 
   return (
     <div style={{ minHeight:"100vh", background:"var(--page-bg)", padding:"28px 32px 60px", animation:"fade-in .3s ease" }}>
@@ -243,13 +267,40 @@ export default function Page() {
           </div>
         </div>
         <button
-          onClick={load} disabled={loading}
+          onClick={()=>load(from,to)} disabled={loading}
           style={{ background: loading ? "var(--border)" : "var(--gold)", color: loading ? "var(--text-3)" : "#000", border:"none", borderRadius:8, padding:"9px 18px", fontSize:13, fontWeight:700, cursor: loading ? "not-allowed" : "pointer", display:"flex", alignItems:"center", gap:7, fontFamily:"inherit" }}
           onMouseEnter={e=>{ if(!loading)(e.currentTarget.style.background="var(--gold-hover)"); }}
           onMouseLeave={e=>{ if(!loading)(e.currentTarget.style.background="var(--gold)"); }}
         >
           ⟳ {loading ? "Refreshing…" : "Refresh"}
         </button>
+      </div>
+
+      {/* Date range bar */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:20, flexWrap:"wrap" }}>
+        {/* Presets */}
+        <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+          {PRESETS.map(p=>(
+            <button key={p.label} onClick={()=>applyPreset(p)}
+              style={{ background: activePreset===p.label ? "var(--gold)" : "var(--card-bg)", color: activePreset===p.label ? "#000" : "var(--text-2)", border:"1px solid var(--border)", borderRadius:6, padding:"5px 12px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit", transition:"all .15s" }}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {/* Divider */}
+        <div style={{ width:1, height:24, background:"var(--border)", margin:"0 4px" }} />
+        {/* Custom inputs */}
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <input type="date" value={from} max={to} onChange={e=>{ setFrom(e.target.value); setActivePreset(""); }}
+            style={{ background:"var(--card-bg)", color:"var(--text-1)", border:"1px solid var(--border)", borderRadius:6, padding:"5px 10px", fontSize:12, fontFamily:"inherit", cursor:"pointer" }} />
+          <span style={{ color:"var(--text-3)", fontSize:12 }}>to</span>
+          <input type="date" value={to} min={from} max={today()} onChange={e=>{ setTo(e.target.value); setActivePreset(""); }}
+            style={{ background:"var(--card-bg)", color:"var(--text-1)", border:"1px solid var(--border)", borderRadius:6, padding:"5px 10px", fontSize:12, fontFamily:"inherit", cursor:"pointer" }} />
+          <button onClick={applyDates} disabled={loading}
+            style={{ background:"var(--card-bg)", color:"var(--gold)", border:"1px solid var(--gold)", borderRadius:6, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+            Apply
+          </button>
+        </div>
       </div>
 
       {/* Error */}

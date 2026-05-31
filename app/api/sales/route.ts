@@ -1,12 +1,23 @@
 // app/api/sales/route.ts
-// Server-side only — service role key never reaches the browser
-
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+function safeDate(s: string | null): string | null {
+  return s && ISO_DATE.test(s) ? s : null;
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const from = safeDate(searchParams.get("from"));
+  const to   = safeDate(searchParams.get("to"));
+
+  const employerDateFilter  = from && to ? `AND e.enquiry_date  BETWEEN '${from}' AND '${to}'` : "";
+  const dealDateFilter      = from && to ? `AND d.date          BETWEEN '${from}' AND '${to}'` : "";
+  const interviewDateFilter = from && to ? `AND i.scheduled_date BETWEEN '${from}' AND '${to}'` : "";
+
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -20,11 +31,15 @@ export async function GET() {
 
   try {
     const [funnel, missed, stale, interview_outcomes] = await Promise.all([
-      // ── 1. Funnel by salesperson ──────────────────────────────────────────
+      // ── 1. Funnel by relationship owner (salesperson) ─────────────────────
       sql(`
         WITH leads AS (
-          SELECT lead_owner AS salesperson, employer_id, contact_name, employer_name
-          FROM employers WHERE lead_owner IS NOT NULL AND active = true
+          SELECT e.relationship_owner AS salesperson, e.employer_id, e.contact_name, e.employer_name
+          FROM employers e
+          WHERE e.relationship_owner IS NOT NULL
+            AND e.relationship_owner NOT IN ('', 'Not Potential', 'test')
+            AND e.active = true
+            ${employerDateFilter}
         ),
         activated   AS (SELECT DISTINCT employer_id FROM profiles_sent),
         interviewed AS (
@@ -53,16 +68,18 @@ export async function GET() {
       // ── 2. Missed deals ───────────────────────────────────────────────────
       sql(`
         SELECT d.employer_name, d.nationality, d.type,
-               d.milestone_status, s.name AS lead_owner, d.date::text AS date
+               d.milestone_status, d.date::text AS date,
+               e.relationship_owner AS lead_owner
         FROM deals d
-        LEFT JOIN staff s ON s.staff_id = d.lead_owner
+        LEFT JOIN employers e ON e.employer_name = d.employer_name
         WHERE d.milestone_status = 'missed'
+          ${dealDateFilter}
         ORDER BY d.date DESC LIMIT 30
       `),
 
       // ── 3. Stale leads (active, no profile sent, >14 days) ────────────────
       sql(`
-        SELECT e.employer_name, e.contact_name, e.lead_owner,
+        SELECT e.employer_name, e.contact_name, e.relationship_owner AS lead_owner,
                e.enquiry_date::text,
                (CURRENT_DATE - e.enquiry_date)::int AS days_stale
         FROM employers e
@@ -70,6 +87,9 @@ export async function GET() {
         WHERE ps.id IS NULL
           AND e.enquiry_date < CURRENT_DATE - INTERVAL '14 days'
           AND e.active = true
+          AND e.relationship_owner IS NOT NULL
+          AND e.relationship_owner NOT IN ('', 'Not Potential', 'test')
+          ${employerDateFilter}
         ORDER BY days_stale DESC LIMIT 30
       `),
 
@@ -83,19 +103,16 @@ export async function GET() {
           COUNT(*) FILTER (WHERE i.status='Cancelled')  AS cancelled,
           COUNT(*) FILTER (WHERE i.status='Postponed')  AS postponed,
           ROUND(100.0*COUNT(*) FILTER (WHERE i.status='Deal')/NULLIF(COUNT(*),0),1) AS deal_rate_pct
-        FROM interview i WHERE i.ro IS NOT NULL
+        FROM interview i
+        WHERE i.ro IS NOT NULL
+          ${interviewDateFilter}
         GROUP BY i.ro ORDER BY deal_rate_pct DESC
       `),
     ]);
 
     return NextResponse.json(
       { funnel, missed, stale, interview_outcomes },
-      {
-        headers: {
-          // Cache for 2 minutes on Vercel edge — refresh button bypasses this
-          "Cache-Control": "s-maxage=120, stale-while-revalidate=60",
-        },
-      }
+      { headers: { "Cache-Control": "s-maxage=120, stale-while-revalidate=60" } }
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
