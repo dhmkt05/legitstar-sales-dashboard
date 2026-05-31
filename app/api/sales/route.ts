@@ -13,7 +13,7 @@ export async function GET() {
   );
 
   async function sql(query: string) {
-    const { data, error } = await supabase.rpc("execute_sql", { query });
+    const { data, error } = await supabase.rpc("execute_sql", { query: query.trim() });
     if (error) throw new Error(error.message);
     return (data as Record<string, unknown>[]) ?? [];
   }
