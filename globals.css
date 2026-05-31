@@ -1,0 +1,31 @@
+/* app/globals.css */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --page-bg:    #080808;
+  --card-bg:    #1C1C1C;
+  --border:     #2C2C2C;
+  --gold:       #F5C518;
+  --gold-hover: #FFD700;
+  --text-1:     #F0F0F0;
+  --text-2:     #888888;
+  --text-3:     #444444;
+  --green:      #22C55E;
+  --red:        #EF4444;
+  --amber:      #F59E0B;
+  --blue:       #3B82F6;
+}
+
+html, body {
+  background: var(--page-bg);
+  color: var(--text-1);
+  font-family: 'Geist', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--page-bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
