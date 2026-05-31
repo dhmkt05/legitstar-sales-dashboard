@@ -4,18 +4,20 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-async function sql(query: string) {
-  const { data, error } = await supabase.rpc("execute_sql", { query });
-  if (error) throw new Error(error.message);
-  return (data as Record<string, unknown>[]) ?? [];
-}
+export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
+  async function sql(query: string) {
+    const { data, error } = await supabase.rpc("execute_sql", { query });
+    if (error) throw new Error(error.message);
+    return (data as Record<string, unknown>[]) ?? [];
+  }
+
   try {
     const [funnel, missed, stale, interview_outcomes] = await Promise.all([
       // ── 1. Funnel by salesperson ──────────────────────────────────────────
